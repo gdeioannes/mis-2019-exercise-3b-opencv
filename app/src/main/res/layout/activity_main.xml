@@ -4,11 +4,14 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:screenOrientation="landscape"
     tools:context=".MainActivity">
 
     <org.opencv.android.JavaCameraView
+        android:id="@+id/color_blob_detection_activity_surface_view"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:id="@+id/color_blob_detection_activity_surface_view" />
+        android:layout_marginStart="8dp"
+        app:layout_constraintStart_toStartOf="parent" />
 
 </android.support.constraint.ConstraintLayout>

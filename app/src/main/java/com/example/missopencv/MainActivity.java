@@ -1,5 +1,13 @@
 package com.example.missopencv;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.List;
 
 import org.opencv.android.BaseLoaderCallback;
@@ -10,15 +18,20 @@ import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.MatOfPoint;
+import org.opencv.core.MatOfRect;
+import org.opencv.core.Point;
 import org.opencv.core.Rect;
 import org.opencv.core.Scalar;
 import org.opencv.core.Size;
 import org.opencv.android.CameraBridgeViewBase;
 import org.opencv.android.CameraBridgeViewBase.CvCameraViewListener2;
 import org.opencv.imgproc.Imgproc;
+import org.opencv.objdetect.CascadeClassifier;
 
 import android.app.Activity;
 import android.os.Bundle;
+import android.os.Environment;
+import android.provider.ContactsContract;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
@@ -27,17 +40,23 @@ import android.view.WindowManager;
 import android.view.View.OnTouchListener;
 import android.view.SurfaceView;
 
-public class MainActivity extends Activity implements OnTouchListener, CvCameraViewListener2 {
+public class MainActivity extends Activity implements  CvCameraViewListener2 {
     private static final String  TAG              = "MainActivity";
 
     private boolean              mIsColorSelected = false;
     private Mat                  mRgba;
     private Scalar               mBlobColorRgba;
     private Scalar               mBlobColorHsv;
-    private ColorBlobDetector    mDetector;
     private Mat                  mSpectrum;
     private Size                 SPECTRUM_SIZE;
     private Scalar               CONTOUR_COLOR;
+
+    CascadeClassifier cascadeClassifier;
+
+    //https://github.com/opencv/opencv/blob/master/data/haarcascades/haarcascade_frontalface_default.xml
+    //https://raw.githubusercontent.com/opencv/opencv/3.4.1/data/haarcascades/haarcascade_eye.xml
+    //https://raw.githubusercontent.com/opencv/opencv_contrib/master/modules/face/data/cascades/haarcascade_mcs_nose.xml
+    String fileName="haarcascade_frontalface_default.xml";
 
     private CameraBridgeViewBase mOpenCvCameraView;
 
@@ -49,7 +68,6 @@ public class MainActivity extends Activity implements OnTouchListener, CvCameraV
                 {
                     Log.i(TAG, "OpenCV loaded successfully");
                     mOpenCvCameraView.enableView();
-                    mOpenCvCameraView.setOnTouchListener(MainActivity.this);
                 } break;
                 default:
                 {
@@ -73,9 +91,12 @@ public class MainActivity extends Activity implements OnTouchListener, CvCameraV
 
         setContentView(R.layout.activity_main);
 
+
         mOpenCvCameraView = (CameraBridgeViewBase) findViewById(R.id.color_blob_detection_activity_surface_view);
         mOpenCvCameraView.setVisibility(SurfaceView.VISIBLE);
+
         mOpenCvCameraView.setCvCameraViewListener(this);
+
     }
 
     @Override
@@ -105,94 +126,76 @@ public class MainActivity extends Activity implements OnTouchListener, CvCameraV
             mOpenCvCameraView.disableView();
     }
 
+    //This is for get the camera data
     public void onCameraViewStarted(int width, int height) {
+        //https://docs.opencv.org/2.4/modules/core/doc/basic_structures.html
         mRgba = new Mat(height, width, CvType.CV_8UC4);
-        mDetector = new ColorBlobDetector();
-        mSpectrum = new Mat();
-        mBlobColorRgba = new Scalar(255);
-        mBlobColorHsv = new Scalar(255);
-        SPECTRUM_SIZE = new Size(200, 64);
-        CONTOUR_COLOR = new Scalar(255,0,0,255);
+
+
+
+        String pathCascadeNoseFile=initAssetFile(fileName);
+        File file =new File(pathCascadeNoseFile);
+        if(file.exists()) {
+            System.out.println("File Exist");
+            cascadeClassifier = new CascadeClassifier(pathCascadeNoseFile);
+        }else{
+            System.out.println("File Don't Exist");
+        }
     }
 
     public void onCameraViewStopped() {
         mRgba.release();
     }
 
-    public boolean onTouch(View v, MotionEvent event) {
-        int cols = mRgba.cols();
-        int rows = mRgba.rows();
-
-        int xOffset = (mOpenCvCameraView.getWidth() - cols) / 2;
-        int yOffset = (mOpenCvCameraView.getHeight() - rows) / 2;
-
-        int x = (int)event.getX() - xOffset;
-        int y = (int)event.getY() - yOffset;
-
-        Log.i(TAG, "Touch image coordinates: (" + x + ", " + y + ")");
-
-        if ((x < 0) || (y < 0) || (x > cols) || (y > rows)) return false;
-
-        Rect touchedRect = new Rect();
-
-        touchedRect.x = (x>4) ? x-4 : 0;
-        touchedRect.y = (y>4) ? y-4 : 0;
-
-        touchedRect.width = (x+4 < cols) ? x + 4 - touchedRect.x : cols - touchedRect.x;
-        touchedRect.height = (y+4 < rows) ? y + 4 - touchedRect.y : rows - touchedRect.y;
-
-        Mat touchedRegionRgba = mRgba.submat(touchedRect);
-
-        Mat touchedRegionHsv = new Mat();
-        Imgproc.cvtColor(touchedRegionRgba, touchedRegionHsv, Imgproc.COLOR_RGB2HSV_FULL);
-
-        // Calculate average color of touched region
-        mBlobColorHsv = Core.sumElems(touchedRegionHsv);
-        int pointCount = touchedRect.width*touchedRect.height;
-        for (int i = 0; i < mBlobColorHsv.val.length; i++)
-            mBlobColorHsv.val[i] /= pointCount;
-
-        mBlobColorRgba = converScalarHsv2Rgba(mBlobColorHsv);
-
-        Log.i(TAG, "Touched rgba color: (" + mBlobColorRgba.val[0] + ", " + mBlobColorRgba.val[1] +
-                ", " + mBlobColorRgba.val[2] + ", " + mBlobColorRgba.val[3] + ")");
-
-        mDetector.setHsvColor(mBlobColorHsv);
-
-        Imgproc.resize(mDetector.getSpectrum(), mSpectrum, SPECTRUM_SIZE, 0, 0, Imgproc.INTER_LINEAR_EXACT);
-
-        mIsColorSelected = true;
-
-        touchedRegionRgba.release();
-        touchedRegionHsv.release();
-
-        return false; // don't need subsequent touch events
-    }
 
     public Mat onCameraFrame(CvCameraViewFrame inputFrame) {
         mRgba = inputFrame.rgba();
 
-        if (mIsColorSelected) {
-            mDetector.process(mRgba);
-            List<MatOfPoint> contours = mDetector.getContours();
-            Log.e(TAG, "Contours count: " + contours.size());
-            Imgproc.drawContours(mRgba, contours, -1, CONTOUR_COLOR);
+        mRgba =rotateMatCW(mRgba);
 
-            Mat colorLabel = mRgba.submat(4, 68, 4, 68);
-            colorLabel.setTo(mBlobColorRgba);
+        Mat gray=mRgba;
+        MatOfRect matOfRect= new MatOfRect();
+        cascadeClassifier.detectMultiScale(gray ,matOfRect,1.3,5,1,new Size(50,50),new Size(400,400));
 
-            Mat spectrumLabel = mRgba.submat(4, 4 + mSpectrum.rows(), 70, 70 + mSpectrum.cols());
-            mSpectrum.copyTo(spectrumLabel);
+        System.out.println("Print info "+matOfRect.size());
+
+        for (int i=0;i<matOfRect.toArray().length;i++) {
+            Rect rect=matOfRect.toArray()[i];
+            Imgproc.rectangle(mRgba, new Point(rect.x, rect.y), new Point(rect.width, rect.height), new Scalar(76, 255, 0));
         }
+
+
+
 
         return mRgba;
     }
 
-    private Scalar converScalarHsv2Rgba(Scalar hsvColor) {
-        Mat pointMatRgba = new Mat();
-        Mat pointMatHsv = new Mat(1, 1, CvType.CV_8UC3, hsvColor);
-        Imgproc.cvtColor(pointMatHsv, pointMatRgba, Imgproc.COLOR_HSV2RGB_FULL, 4);
-
-        return new Scalar(pointMatRgba.get(0, 0));
+    //Open CV only accept path for the xml, the asset manager don't use File object, so this function
+    //read the assets stream and outputs a File and retrives the path
+    //https://stackoverflow.com/questions/53557853/error-while-loading-yaml-model-file-using-opencv-in-android
+    public String initAssetFile(String filename)  {
+        File file = new File(getFilesDir(), filename);
+        if (!file.exists()) try {
+            InputStream is = getAssets().open(filename);
+            OutputStream os = new FileOutputStream(file);
+            byte[] data = new byte[is.available()];
+            is.read(data); os.write(data); is.close(); os.close();
+        } catch (IOException e) { e.printStackTrace(); }
+        Log.d(TAG,"prepared local file: "+filename);
+        return file.getAbsolutePath();
     }
+
+
+    //I was having some asetion error it was stupid but this helps to firgure it out
+    //https://stackoverflow.com/questions/13772704/opencv-nmattobitmap-assertion-failed
+    //Rotation was achieve thanks to this
+    //https://www.tutorialspoint.com/javaexamples/rotate_image.htm
+    Mat rotateMatCW(Mat  src ) {
+        Mat result = new Mat();
+        Mat rotationMatrix = Imgproc.getRotationMatrix2D(new Point(src.cols()/2,src.rows()/2),270,1);
+        //Rotating the given image
+        Imgproc.warpAffine(src, result,rotationMatrix, new Size(src.cols(), src.rows()));
+        return result;
+    }
+
 }
