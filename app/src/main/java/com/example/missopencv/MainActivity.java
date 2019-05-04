@@ -1,14 +1,10 @@
 package com.example.missopencv;
 
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
-import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.List;
 
 import org.opencv.android.BaseLoaderCallback;
 import org.opencv.android.CameraBridgeViewBase.CvCameraViewFrame;
@@ -17,7 +13,6 @@ import org.opencv.android.OpenCVLoader;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
-import org.opencv.core.MatOfPoint;
 import org.opencv.core.MatOfRect;
 import org.opencv.core.Point;
 import org.opencv.core.Rect;
@@ -29,16 +24,15 @@ import org.opencv.imgproc.Imgproc;
 import org.opencv.objdetect.CascadeClassifier;
 
 import android.app.Activity;
+import android.content.Context;
+import android.content.pm.PackageManager;
 import android.os.Bundle;
-import android.os.Environment;
-import android.provider.ContactsContract;
 import android.util.Log;
-import android.view.MotionEvent;
-import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
-import android.view.View.OnTouchListener;
 import android.view.SurfaceView;
+import android.widget.Toast;
+
 
 public class MainActivity extends Activity implements  CvCameraViewListener2 {
     private static final String  TAG              = "MainActivity";
@@ -91,12 +85,26 @@ public class MainActivity extends Activity implements  CvCameraViewListener2 {
 
         setContentView(R.layout.activity_main);
 
+        if(checkCameraHardware(this)) {
+            mOpenCvCameraView = findViewById(R.id.color_blob_detection_activity_surface_view);
+            mOpenCvCameraView.setVisibility(SurfaceView.VISIBLE);
 
-        mOpenCvCameraView = (CameraBridgeViewBase) findViewById(R.id.color_blob_detection_activity_surface_view);
-        mOpenCvCameraView.setVisibility(SurfaceView.VISIBLE);
+            mOpenCvCameraView.setCvCameraViewListener(this);
+        }else{
+            Toast toast = Toast.makeText(this, "No Camera Found", Toast.LENGTH_SHORT);
+            toast.show();
+        }
 
-        mOpenCvCameraView.setCvCameraViewListener(this);
+    }
 
+    private boolean checkCameraHardware(Context context) {
+        if (context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA)){
+            // this device has a camera
+            return true;
+        } else {
+            // no camera on this device
+            return false;
+        }
     }
 
     @Override
@@ -131,8 +139,6 @@ public class MainActivity extends Activity implements  CvCameraViewListener2 {
         //https://docs.opencv.org/2.4/modules/core/doc/basic_structures.html
         mRgba = new Mat(height, width, CvType.CV_8UC4);
 
-
-
         String pathCascadeNoseFile=initAssetFile(fileName);
         File file =new File(pathCascadeNoseFile);
         if(file.exists()) {
@@ -143,34 +149,40 @@ public class MainActivity extends Activity implements  CvCameraViewListener2 {
         }
     }
 
-    public void onCameraViewStopped() {
-        mRgba.release();
-    }
-
-
     public Mat onCameraFrame(CvCameraViewFrame inputFrame) {
         mRgba = inputFrame.rgba();
 
         mRgba =rotateMatCW(mRgba);
 
-        Mat gray=mRgba;
+        //Try using the RGB video but goes faster and better with a gray one
+        Mat gray= new Mat();
+        gray=mRgba;
+        Core.flip(gray,gray,1);
+
+
         MatOfRect matOfRect= new MatOfRect();
-        cascadeClassifier.detectMultiScale(gray ,matOfRect,1.3,5,1,new Size(50,50),new Size(400,400));
+        //Usefull explanation of the parameters that I use
+        //https://stackoverflow.com/questions/20801015/recommended-values-for-opencv-detectmultiscale-parameters
+        cascadeClassifier.detectMultiScale(gray ,matOfRect,1.3,1,1,new Size(100,100),new Size(600,600));
 
         System.out.println("Print info "+matOfRect.size());
 
         for (int i=0;i<matOfRect.toArray().length;i++) {
             Rect rect=matOfRect.toArray()[i];
-            Imgproc.rectangle(mRgba, new Point(rect.x, rect.y), new Point(rect.width, rect.height), new Scalar(76, 255, 0));
+            //Imgproc.rectangle(mRgba, new Point(rect.x, rect.y), new Point(rect.width, rect.height), new Scalar(76, 255, 0));
+
+            //https://docs.opencv.org/2.4/modules/core/doc/drawing_functions.html
+            Imgproc.circle(mRgba,new Point(rect.x+(rect.width/2),rect.y+(rect.height*0.6)),(int)(rect.width*0.15f),new Scalar(255, 0, 0),-1,8,0);
         }
-
-
-
-
+        Core.flip(gray,gray,1);
         return mRgba;
     }
 
-    //Open CV only accept path for the xml, the asset manager don't use File object, so this function
+    public void onCameraViewStopped() {
+        mRgba.release();
+    }
+
+    //OpenCv only accept path for the xml, the asset manager don't use File object, so this function
     //read the assets stream and outputs a File and retrives the path
     //https://stackoverflow.com/questions/53557853/error-while-loading-yaml-model-file-using-opencv-in-android
     public String initAssetFile(String filename)  {
@@ -186,13 +198,14 @@ public class MainActivity extends Activity implements  CvCameraViewListener2 {
     }
 
 
-    //I was having some asetion error it was stupid but this helps to firgure it out
+    //I was having some asertion error it was stupid but this helps me to firgur it out
     //https://stackoverflow.com/questions/13772704/opencv-nmattobitmap-assertion-failed
     //Rotation was achieve thanks to this
     //https://www.tutorialspoint.com/javaexamples/rotate_image.htm
     Mat rotateMatCW(Mat  src ) {
         Mat result = new Mat();
         Mat rotationMatrix = Imgproc.getRotationMatrix2D(new Point(src.cols()/2,src.rows()/2),270,1);
+
         //Rotating the given image
         Imgproc.warpAffine(src, result,rotationMatrix, new Size(src.cols(), src.rows()));
         return result;
